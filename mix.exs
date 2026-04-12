@@ -2,7 +2,7 @@ defmodule Ferry.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/yourusername/ferry"
+  @source_url "https://github.com/iamsteeve/ferry"
 
   def project do
     [
