@@ -1,0 +1,143 @@
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/ferry_dashboard_web";
+
+@plugin "../vendor/heroicons";
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* ── Custom Animations ── */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes count-up {
+  from {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@utility animate-slide-in {
+  animation: slide-in 0.25s ease-out both;
+}
+
+@utility animate-slide-up {
+  animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@utility animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+@utility animate-shimmer {
+  background: linear-gradient(90deg, transparent 33%, rgba(255,255,255,0.03) 50%, transparent 67%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@utility animate-count {
+  animation: count-up 0.2s ease-out;
+}
+
+@keyframes flash-new {
+  0% {
+    background-color: rgba(99, 102, 241, 0.2);
+    box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.3);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+@utility animate-flash-new {
+  animation: flash-new 1.5s ease-out both;
+}
+
+/* Smooth scrollbar for dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(63 63 70) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(63 63 70);
+  border-radius: 3px;
+}
+
+/* Active scale for buttons */
+button:active {
+  transform: scale(0.96);
+}
