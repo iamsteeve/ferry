@@ -100,6 +100,24 @@ defmodule Ferry.Store.EtsTest do
     end
   end
 
+  describe "memory_bytes/1" do
+    test "returns positive bytes for empty tables", %{state: state} do
+      bytes = Ets.memory_bytes(state)
+      assert is_integer(bytes)
+      assert bytes > 0
+    end
+
+    test "increases after pushing operations", %{state: state} do
+      before = Ets.memory_bytes(state)
+
+      ops = Enum.map(1..50, &build_op("op#{&1}", &1, String.duplicate("x", 100)))
+      {:ok, state} = Ets.push_many(state, ops)
+
+      after_push = Ets.memory_bytes(state)
+      assert after_push > before
+    end
+  end
+
   describe "completed management" do
     test "mark_completed and list", %{state: state} do
       {:ok, state} = Ets.push(state, build_op("op1", 1))

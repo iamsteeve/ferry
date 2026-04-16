@@ -278,6 +278,11 @@ defmodule Ferry.Store.Memory do
     {count, %{state | queue: :queue.new(), dlq: dlq, index: index}}
   end
 
+  @impl true
+  def memory_bytes(state) do
+    :erlang.external_size(state)
+  end
+
   # Private helpers
 
   defp put_in_queue(state, op) do

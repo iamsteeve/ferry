@@ -59,4 +59,6 @@ defmodule Ferry.Store do
               {non_neg_integer(), state}
 
   @callback clear_queue(state, error :: term()) :: {non_neg_integer(), state}
+
+  @callback memory_bytes(state) :: non_neg_integer()
 end

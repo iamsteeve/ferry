@@ -80,4 +80,25 @@ defmodule Ferry.ServerTest do
       assert %DateTime{} = op.completed_at
     end
   end
+
+  describe "stats/1" do
+    test "includes memory_bytes" do
+      name = start_ferry()
+      stats = Ferry.stats(name)
+      assert is_integer(stats.memory_bytes)
+      assert stats.memory_bytes > 0
+    end
+
+    test "memory_bytes grows with operations" do
+      name = start_ferry()
+      stats_before = Ferry.stats(name)
+
+      Enum.each(1..50, fn i ->
+        Ferry.push(name, %{data: String.duplicate("payload", 10), index: i})
+      end)
+
+      stats_after = Ferry.stats(name)
+      assert stats_after.memory_bytes > stats_before.memory_bytes
+    end
+  end
 end

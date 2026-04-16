@@ -707,6 +707,7 @@ defmodule Ferry.Server do
       avg_batch_duration_ms: avg,
       last_flush_at: state.last_flush_at,
       uptime_ms: uptime_ms,
+      memory_bytes: state.store_module.memory_bytes(state.store),
       status: state.status
     }
   end
