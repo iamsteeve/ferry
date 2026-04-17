@@ -512,17 +512,20 @@ defmodule FerryDashboardWeb.DashboardLive do
 
   defp global_stats(assigns) do
     totals =
-      Enum.reduce(assigns.ferry_stats, %{pushed: 0, processed: 0, failed: 0, queued: 0}, fn {_k,
-                                                                                             s},
-                                                                                            acc ->
-        %{
-          acc
-          | pushed: acc.pushed + s.total_pushed,
-            processed: acc.processed + s.total_processed,
-            failed: acc.failed + s.total_failed,
-            queued: acc.queued + s.queue_size
-        }
-      end)
+      Enum.reduce(
+        assigns.ferry_stats,
+        %{pushed: 0, processed: 0, failed: 0, queued: 0, memory: 0},
+        fn {_k, s}, acc ->
+          %{
+            acc
+            | pushed: acc.pushed + s.total_pushed,
+              processed: acc.processed + s.total_processed,
+              failed: acc.failed + s.total_failed,
+              queued: acc.queued + s.queue_size,
+              memory: acc.memory + s.memory_bytes
+          }
+        end
+      )
 
     assigns = assign(assigns, :totals, totals)
 
@@ -548,6 +551,12 @@ defmodule FerryDashboardWeb.DashboardLive do
         <span class="text-zinc-400">Queued</span>
         <span class="ml-1.5 font-mono font-medium text-amber-400">
           {format_number(@totals.queued)}
+        </span>
+      </div>
+      <div class="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30">
+        <span class="text-zinc-400">Memory</span>
+        <span class="ml-1.5 font-mono font-medium text-cyan-400">
+          {format_bytes(@totals.memory)}
         </span>
       </div>
     </div>
@@ -770,7 +779,7 @@ defmodule FerryDashboardWeb.DashboardLive do
         </div>
         
     <!-- Stats Grid -->
-        <div class="grid grid-cols-3 gap-3 mb-4">
+        <div class="grid grid-cols-4 gap-3 mb-4">
           <div>
             <p class="text-[10px] text-zinc-600 uppercase tracking-wider">Queue</p>
             <p class={"text-lg font-mono font-semibold transition-all duration-300 " <> @color_classes.queue_text}>
@@ -788,6 +797,12 @@ defmodule FerryDashboardWeb.DashboardLive do
             <p class={"text-lg font-mono font-semibold transition-all duration-300 " <>
               if(@stats.dlq_size > 0, do: "text-red-400", else: "text-zinc-600")}>
               {@stats.dlq_size}
+            </p>
+          </div>
+          <div>
+            <p class="text-[10px] text-zinc-600 uppercase tracking-wider">Memory</p>
+            <p class="text-lg font-mono font-semibold text-cyan-400 transition-all duration-300">
+              {format_bytes(@stats.memory_bytes)}
             </p>
           </div>
         </div>
@@ -914,7 +929,7 @@ defmodule FerryDashboardWeb.DashboardLive do
       </div>
       
     <!-- Stats Row -->
-      <div class="px-5 py-3 grid grid-cols-6 gap-4 border-b border-zinc-800/30 bg-zinc-900/50">
+      <div class="px-5 py-3 grid grid-cols-7 gap-4 border-b border-zinc-800/30 bg-zinc-900/50">
         <.stat_pill label="Pushed" value={@stats.total_pushed} />
         <.stat_pill label="Processed" value={@stats.total_processed} color="emerald" />
         <.stat_pill label="Failed" value={@stats.total_failed} color="red" />
@@ -925,6 +940,7 @@ defmodule FerryDashboardWeb.DashboardLive do
           value={Float.round(@stats.avg_batch_duration_ms, 1)}
           color="violet"
         />
+        <.stat_pill label="Memory" value={format_bytes(@stats.memory_bytes)} color="cyan" />
       </div>
       
     <!-- Tabs -->
@@ -1016,6 +1032,7 @@ defmodule FerryDashboardWeb.DashboardLive do
   defp stat_text_class("amber"), do: "text-amber-400"
   defp stat_text_class("blue"), do: "text-blue-400"
   defp stat_text_class("violet"), do: "text-violet-400"
+  defp stat_text_class("cyan"), do: "text-cyan-400"
   defp stat_text_class(_), do: "text-zinc-400"
 
   defp pending_panel(assigns) do
@@ -1315,6 +1332,11 @@ defmodule FerryDashboardWeb.DashboardLive do
   defp format_number(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)}M"
   defp format_number(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)}k"
   defp format_number(n), do: "#{n}"
+
+  defp format_bytes(b) when b >= 1_073_741_824, do: "#{Float.round(b / 1_073_741_824, 1)} GB"
+  defp format_bytes(b) when b >= 1_048_576, do: "#{Float.round(b / 1_048_576, 1)} MB"
+  defp format_bytes(b) when b >= 1024, do: "#{Float.round(b / 1024, 1)} KB"
+  defp format_bytes(b), do: "#{b} B"
 
   defp format_interval(ms) when ms >= 60_000, do: "#{div(ms, 60_000)}m"
   defp format_interval(ms) when ms >= 1_000, do: "#{div(ms, 1_000)}s"
