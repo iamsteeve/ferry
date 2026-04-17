@@ -15,6 +15,7 @@ defmodule Ferry.Stats do
           avg_batch_duration_ms: float(),
           last_flush_at: DateTime.t() | nil,
           uptime_ms: non_neg_integer(),
+          memory_bytes: non_neg_integer(),
           status: :running | :paused
         }
 
@@ -29,5 +30,6 @@ defmodule Ferry.Stats do
             avg_batch_duration_ms: 0.0,
             last_flush_at: nil,
             uptime_ms: 0,
+            memory_bytes: 0,
             status: :running
 end

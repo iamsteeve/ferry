@@ -121,6 +121,24 @@ defmodule Ferry.Store.MemoryTest do
     end
   end
 
+  describe "memory_bytes/1" do
+    test "returns positive bytes for empty state", %{state: state} do
+      bytes = Memory.memory_bytes(state)
+      assert is_integer(bytes)
+      assert bytes > 0
+    end
+
+    test "increases after pushing operations", %{state: state} do
+      before = Memory.memory_bytes(state)
+
+      ops = Enum.map(1..50, &build_op("op#{&1}", &1, String.duplicate("x", 100)))
+      {:ok, state} = Memory.push_many(state, ops)
+
+      after_push = Memory.memory_bytes(state)
+      assert after_push > before
+    end
+  end
+
   describe "purge_completed/3" do
     test "purges by max count", %{state: state} do
       now = DateTime.utc_now()

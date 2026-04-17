@@ -269,6 +269,16 @@ defmodule Ferry.Store.Ets do
     {count, state}
   end
 
+  @impl true
+  def memory_bytes(state) do
+    word_size = :erlang.system_info(:wordsize)
+
+    [:queue_table, :dlq_table, :completed_table, :index_table]
+    |> Enum.map(fn field -> :ets.info(Map.fetch!(state, field), :memory) end)
+    |> Enum.sum()
+    |> Kernel.*(word_size)
+  end
+
   # Public helpers for heir handoff
 
   @doc false
