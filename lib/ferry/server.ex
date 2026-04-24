@@ -86,6 +86,14 @@ defmodule Ferry.Server do
     GenServer.call(via(name), :clear)
   end
 
+  def drain_completed(name) do
+    GenServer.call(via(name), :drain_completed)
+  end
+
+  def delete(name, operation_id) do
+    GenServer.call(via(name), {:delete, operation_id})
+  end
+
   def pending(name, opts \\ []) do
     GenServer.call(via(name), {:pending, opts})
   end
@@ -326,6 +334,29 @@ defmodule Ferry.Server do
     Telemetry.emit_queue_cleared(state.config.name, count)
     Logger.info("[Ferry:#{state.config.name}] Cleared #{count} pending operations")
     {:reply, {:ok, count}, %{state | store: new_store, total_failed: state.total_failed + count}}
+  end
+
+  @impl true
+  def handle_call(:drain_completed, _from, state) do
+    {count, new_store} = state.store_module.drain_completed(state.store)
+
+    if count > 0 do
+      Telemetry.emit_completed_drained(state.config.name, count)
+      Logger.info("[Ferry:#{state.config.name}] Drained #{count} completed operations")
+    end
+
+    {:reply, {:ok, count}, %{state | store: new_store}}
+  end
+
+  @impl true
+  def handle_call({:delete, operation_id}, _from, state) do
+    {result, new_store} = state.store_module.delete(state.store, operation_id)
+
+    if result == :ok do
+      Telemetry.emit_operation_deleted(state.config.name, operation_id)
+    end
+
+    {:reply, result, %{state | store: new_store}}
   end
 
   @impl true

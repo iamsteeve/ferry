@@ -265,6 +265,32 @@ defmodule Ferry do
     Ferry.Server.clear(ferry_name)
   end
 
+  @doc """
+  Permanently discard all completed operations.
+
+  Completed history is normally purged automatically based on `completed_ttl`
+  and `max_completed`. Use this to force an immediate wipe regardless of age
+  or count. Returns `{:ok, count}` with the number of discarded operations.
+  """
+  @spec drain_completed(ferry_name()) :: {:ok, non_neg_integer()}
+  def drain_completed(ferry_name) do
+    Ferry.Server.drain_completed(ferry_name)
+  end
+
+  @doc """
+  Delete a single operation by ID from the queue, completed history, or DLQ.
+
+  Returns `:ok` if the operation existed and was removed, or
+  `{:error, :not_found}` otherwise.
+
+  If the operation is currently being processed, the resolver's result for it
+  will be silently discarded when the batch returns.
+  """
+  @spec delete(ferry_name(), String.t()) :: :ok | {:error, :not_found}
+  def delete(ferry_name, operation_id) do
+    Ferry.Server.delete(ferry_name, operation_id)
+  end
+
   # ── Introspection ──
 
   # ── Batch History ──

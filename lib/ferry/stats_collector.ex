@@ -33,7 +33,9 @@ defmodule Ferry.StatsCollector do
       [:ferry, :queue, :resumed],
       [:ferry, :dlq, :retried],
       [:ferry, :dlq, :drained],
-      [:ferry, :completed, :purged]
+      [:ferry, :completed, :purged],
+      [:ferry, :completed, :drained],
+      [:ferry, :operation, :deleted]
     ]
 
     :telemetry.attach_many(

@@ -251,6 +251,35 @@ defmodule Ferry.Store.Ets do
   end
 
   @impl true
+  def drain_completed(state) do
+    completed = :ets.tab2list(state.completed_table)
+    count = length(completed)
+
+    Enum.each(completed, fn {_key, op} ->
+      :ets.delete(state.index_table, op.id)
+    end)
+
+    :ets.delete_all_objects(state.completed_table)
+
+    {count, state}
+  end
+
+  @impl true
+  def delete(state, id) do
+    case :ets.lookup(state.index_table, id) do
+      [{^id, op}] ->
+        :ets.delete(state.index_table, id)
+        :ets.delete(state.dlq_table, id)
+        delete_completed_by_id(state.completed_table, id)
+        delete_from_queue_by_id(state.queue_table, id, op.order)
+        {:ok, state}
+
+      [] ->
+        {{:error, :not_found}, state}
+    end
+  end
+
+  @impl true
   def clear_queue(state, error) do
     ops =
       :ets.tab2list(state.queue_table)
@@ -345,5 +374,15 @@ defmodule Ferry.Store.Ets do
 
   defp delete_from_queue_by_id(table, id, order) do
     :ets.delete(table, {order, id})
+  end
+
+  defp delete_completed_by_id(table, id) do
+    case :ets.match(table, {{:"$1", id}, :_}) do
+      [] ->
+        :ok
+
+      rows ->
+        Enum.each(rows, fn [ts] -> :ets.delete(table, {ts, id}) end)
+    end
   end
 end
