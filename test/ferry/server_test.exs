@@ -81,6 +81,45 @@ defmodule Ferry.ServerTest do
     end
   end
 
+  describe "drain_completed/1" do
+    test "wipes completed history" do
+      name = start_ferry()
+      {:ok, id} = Ferry.push(name, :payload)
+      :ok = Ferry.flush(name)
+
+      assert {:ok, %Ferry.Operation{status: :completed}} = Ferry.status(name, id)
+
+      assert {:ok, 1} = Ferry.drain_completed(name)
+      assert {:error, :not_found} = Ferry.status(name, id)
+      assert {:ok, 0} = Ferry.drain_completed(name)
+    end
+  end
+
+  describe "delete/2" do
+    test "removes a pending operation" do
+      name = start_ferry()
+      {:ok, id} = Ferry.push(name, :payload)
+
+      assert :ok = Ferry.delete(name, id)
+      assert Ferry.queue_size(name) == 0
+      assert {:error, :not_found} = Ferry.status(name, id)
+    end
+
+    test "removes a completed operation" do
+      name = start_ferry()
+      {:ok, id} = Ferry.push(name, :payload)
+      :ok = Ferry.flush(name)
+
+      assert :ok = Ferry.delete(name, id)
+      assert {:error, :not_found} = Ferry.status(name, id)
+    end
+
+    test "returns not_found for unknown ID" do
+      name = start_ferry()
+      assert {:error, :not_found} = Ferry.delete(name, "fry_nope")
+    end
+  end
+
   describe "stats/1" do
     test "includes memory_bytes" do
       name = start_ferry()

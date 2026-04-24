@@ -154,4 +154,22 @@ defmodule Ferry.Telemetry do
       %{ferry: ferry_name}
     )
   end
+
+  @doc false
+  def emit_completed_drained(ferry_name, count) do
+    :telemetry.execute(
+      [:ferry, :completed, :drained],
+      %{count: count},
+      %{ferry: ferry_name}
+    )
+  end
+
+  @doc false
+  def emit_operation_deleted(ferry_name, operation_id) do
+    :telemetry.execute(
+      [:ferry, :operation, :deleted],
+      %{},
+      %{ferry: ferry_name, operation_id: operation_id}
+    )
+  end
 end

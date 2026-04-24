@@ -58,7 +58,11 @@ defmodule Ferry.Store do
   @callback purge_completed(state, max_age_ms :: integer(), max_count :: integer()) ::
               {non_neg_integer(), state}
 
+  @callback drain_completed(state) :: {non_neg_integer(), state}
+
   @callback clear_queue(state, error :: term()) :: {non_neg_integer(), state}
+
+  @callback delete(state, String.t()) :: {:ok | {:error, :not_found}, state}
 
   @callback memory_bytes(state) :: non_neg_integer()
 end
