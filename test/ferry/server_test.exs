@@ -140,4 +140,83 @@ defmodule Ferry.ServerTest do
       assert stats_after.memory_bytes > stats_before.memory_bytes
     end
   end
+
+  describe "hibernation" do
+    test "process hibernates after draining the queue via flush" do
+      name = start_ferry()
+      {:ok, _ids} = Ferry.push_many(name, Enum.to_list(1..10))
+      :ok = Ferry.flush(name)
+
+      pid = Process.whereis(:"#{name}.Server")
+      assert is_pid(pid)
+
+      wait_until(fn -> hibernated?(pid) end, 500)
+      assert hibernated?(pid)
+    end
+
+    test "process does not hibernate while a flush is still in flight" do
+      # slow_resolver keeps `flushing != nil` long enough for us to observe.
+      name = start_ferry(resolver: slow_resolver(150))
+      {:ok, _id} = Ferry.push(name, :a)
+
+      flush_task = Task.async(fn -> Ferry.flush(name) end)
+
+      pid = Process.whereis(:"#{name}.Server")
+      assert is_pid(pid)
+
+      # While the resolver is sleeping, we should not be hibernated.
+      Process.sleep(50)
+      refute hibernated?(pid)
+
+      :ok = Task.await(flush_task, 1_000)
+      wait_until(fn -> hibernated?(pid) end, 500)
+      assert hibernated?(pid)
+    end
+
+    test "heap shrinks after hibernation" do
+      name = start_ferry(max_queue_size: 1_000, batch_size: 200)
+      pid = Process.whereis(:"#{name}.Server")
+
+      # Inflate the heap with a large push burst.
+      payloads = Enum.map(1..200, fn i -> %{data: String.duplicate("x", 500), i: i} end)
+      {:ok, _ids} = Ferry.push_many(name, payloads)
+
+      {:heap_size, peak_heap} = Process.info(pid, :heap_size)
+
+      :ok = Ferry.flush(name)
+      {:ok, _count} = Ferry.drain_completed(name)
+
+      wait_until(fn -> hibernated?(pid) end, 500)
+      {:heap_size, hibernated_heap} = Process.info(pid, :heap_size)
+
+      # After hibernate, the heap should be substantially smaller than the peak.
+      assert hibernated_heap < peak_heap
+    end
+  end
+
+  defp hibernated?(pid) do
+    case Process.info(pid, :current_function) do
+      {:current_function, {:erlang, :hibernate, _}} -> true
+      {:current_function, {:gen_server, :loop_hibernate, _}} -> true
+      _ -> false
+    end
+  end
+
+  defp wait_until(fun, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until(fun, deadline)
+  end
+
+  defp do_wait_until(fun, deadline) do
+    if fun.() do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        :timeout
+      else
+        Process.sleep(10)
+        do_wait_until(fun, deadline)
+      end
+    end
+  end
 end
