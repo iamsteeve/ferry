@@ -427,7 +427,7 @@ defmodule Ferry.Server do
       GenServer.reply(caller, :ok)
     end)
 
-    {:noreply, %{state | flush_callers: []}}
+    maybe_hibernate(%{state | flush_callers: []})
   end
 
   # Async flush crash handler
@@ -468,7 +468,7 @@ defmodule Ferry.Server do
       GenServer.reply(caller, :ok)
     end)
 
-    {:noreply, %{state | flush_callers: []}}
+    maybe_hibernate(%{state | flush_callers: []})
   end
 
   @impl true
@@ -485,7 +485,7 @@ defmodule Ferry.Server do
     end
 
     schedule_purge()
-    {:noreply, %{state | store: new_store}}
+    maybe_hibernate(%{state | store: new_store})
   end
 
   @impl true
@@ -758,6 +758,17 @@ defmodule Ferry.Server do
 
   defp schedule_purge do
     Process.send_after(self(), :purge_completed, @purge_interval)
+  end
+
+  # Hibernate the GenServer when fully idle: queue empty, no flush in flight.
+  # Forces a fullsweep GC and compacts the heap to the minimum needed for the
+  # live state, returning RAM to the BEAM after a peak load.
+  defp maybe_hibernate(state) do
+    if state.flushing == nil and state.store_module.queue_size(state.store) == 0 do
+      {:noreply, state, :hibernate}
+    else
+      {:noreply, state}
+    end
   end
 
   defp batch_status_override(:dlq_timeout), do: :timeout
