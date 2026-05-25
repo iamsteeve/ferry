@@ -206,6 +206,90 @@ defmodule Ferry.Store.MemoryTest do
     end
   end
 
+  describe "lite index" do
+    test "index entry for a completed op has no payload/result/error", %{state: state} do
+      {:ok, state} = Memory.push(state, build_op("op1", 1, %{big: String.duplicate("x", 200)}))
+      {_ops, state} = Memory.pop_batch(state, 1)
+      {:ok, state} = Memory.mark_completed(state, "op1", :result_value, DateTime.utc_now(), "b1")
+
+      lite = Map.fetch!(state.index, "op1")
+      assert lite.status == :completed
+      assert lite.payload == nil
+      assert lite.result == nil
+      assert lite.error == nil
+      # Bookkeeping fields needed for delete/2 and queries are preserved.
+      assert lite.id == "op1"
+      assert lite.order == 1
+      assert lite.batch_id == "b1"
+      assert %DateTime{} = lite.completed_at
+    end
+
+    test "index entry for a dead op has no payload/result/error", %{state: state} do
+      {:ok, state} = Memory.push(state, build_op("op1", 1, %{big: String.duplicate("x", 200)}))
+      {_ops, state} = Memory.pop_batch(state, 1)
+      {:ok, state} = Memory.mark_failed(state, "op1", :err, DateTime.utc_now(), nil)
+
+      lite = Map.fetch!(state.index, "op1")
+      assert lite.status == :dead
+      assert lite.payload == nil
+      assert lite.error == nil
+    end
+
+    test "get/2 hydrates a completed op back to the full record", %{state: state} do
+      payload = %{key: "value", n: 42}
+      {:ok, state} = Memory.push(state, build_op("op1", 1, payload))
+      {_ops, state} = Memory.pop_batch(state, 1)
+      {:ok, state} = Memory.mark_completed(state, "op1", :result_value, DateTime.utc_now(), "b1")
+
+      {:ok, op} = Memory.get(state, "op1")
+      assert op.status == :completed
+      assert op.payload == payload
+      assert op.result == :result_value
+      assert op.batch_id == "b1"
+    end
+
+    test "get/2 hydrates a dead op back to the full record", %{state: state} do
+      payload = %{key: "value"}
+      {:ok, state} = Memory.push(state, build_op("op1", 1, payload))
+      {_ops, state} = Memory.pop_batch(state, 1)
+
+      {:ok, state} =
+        Memory.mark_failed(state, "op1", {:fatal, :badness}, DateTime.utc_now(), nil)
+
+      {:ok, op} = Memory.get(state, "op1")
+      assert op.status == :dead
+      assert op.payload == payload
+      assert op.error == {:fatal, :badness}
+    end
+
+    test "memory_bytes is lower with lite index vs hypothetical full duplication",
+         %{state: state} do
+      # Push many ops with a sizable payload, mark them all completed, then
+      # measure. The duplicated bytes would dominate without the lite index.
+      payload = %{blob: String.duplicate("x", 500)}
+
+      state =
+        Enum.reduce(1..100, state, fn i, acc ->
+          {:ok, acc} = Memory.push(acc, build_op("op#{i}", i, payload))
+          {_ops, acc} = Memory.pop_batch(acc, 1)
+          {:ok, acc} = Memory.mark_completed(acc, "op#{i}", :ok, DateTime.utc_now(), nil)
+          acc
+        end)
+
+      lite_bytes = Memory.memory_bytes(state)
+
+      # Synthetically inflate the index back to full ops to estimate the
+      # baseline. This gives us a concrete delta to assert on.
+      inflated_index =
+        Map.new(state.index, fn {id, _lite} -> {id, Map.fetch!(state.completed, id)} end)
+
+      full_bytes = :erlang.external_size(%{state | index: inflated_index})
+      assert lite_bytes < full_bytes
+      # Sanity check: savings should be meaningful, not just a few bytes.
+      assert full_bytes - lite_bytes > 10_000
+    end
+  end
+
   describe "purge_completed/3" do
     test "purges by max count", %{state: state} do
       now = DateTime.utc_now()
