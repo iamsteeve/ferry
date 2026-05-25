@@ -313,6 +313,15 @@ Ferry.drain_dead_letters(name)
 ```elixir
 Ferry.clear(name)
 # {:ok, count} — moves all pending to DLQ with error :canceled
+
+Ferry.drain_completed(name)
+# {:ok, count} — permanently discards all completed operations from history,
+# regardless of `max_completed` / `completed_ttl`
+
+Ferry.delete(name, id)
+# :ok | {:error, :not_found} — removes a single operation by ID from the
+# queue, completed history, or DLQ. If the operation is currently being
+# processed, the resolver's result for it is silently discarded.
 ```
 
 ### Batch History
@@ -363,6 +372,10 @@ Ferry.purge_batch_history(name)
   avg_batch_duration_ms: float(),            # average batch duration
   last_flush_at:         DateTime.t() | nil, # last flush completion time
   uptime_ms:             non_neg_integer(),  # ms since instance start
+  memory_bytes:          non_neg_integer(),  # approximate store footprint
+                                             # (`:erlang.external_size/1` for
+                                             # :memory; sum of `:ets.info/2`
+                                             # `:memory` × word size for :ets)
   status:                :running | :paused  # current instance status
 }
 ```
