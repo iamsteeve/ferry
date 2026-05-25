@@ -3,9 +3,16 @@ defmodule Ferry.Store.Memory do
   In-memory store implementation using `:queue` and maps.
 
   Fastest option. State is lost on process crash.
+
+  The lookup `index` keeps a lightweight projection (no payload, result, or
+  error) for terminal-state operations (`:completed`, `:dead`). The full
+  record lives in `completed`/`dlq`, and `get/2` hydrates back to the full
+  operation on read.
   """
 
   @behaviour Ferry.Store
+
+  alias Ferry.Operation
 
   defstruct queue: :queue.new(),
             completed: %{},
@@ -18,7 +25,7 @@ defmodule Ferry.Store.Memory do
   end
 
   @impl true
-  def push(state, %Ferry.Operation{} = op) do
+  def push(state, %Operation{} = op) do
     state =
       state
       |> put_in_queue(op)
@@ -55,8 +62,17 @@ defmodule Ferry.Store.Memory do
   @impl true
   def get(state, id) do
     case Map.fetch(state.index, id) do
-      {:ok, op} -> {:ok, op}
-      :error -> {:error, :not_found}
+      {:ok, %Operation{status: :completed, id: ^id} = lite} ->
+        {:ok, Map.get(state.completed, id, lite)}
+
+      {:ok, %Operation{status: :dead, id: ^id} = lite} ->
+        {:ok, Map.get(state.dlq, id, lite)}
+
+      {:ok, op} ->
+        {:ok, op}
+
+      :error ->
+        {:error, :not_found}
     end
   end
 
@@ -64,7 +80,7 @@ defmodule Ferry.Store.Memory do
   def mark_completed(state, id, result, completed_at, batch_id) do
     case Map.fetch(state.index, id) do
       {:ok, op} ->
-        updated = %{
+        full = %{
           op
           | status: :completed,
             result: result,
@@ -74,8 +90,8 @@ defmodule Ferry.Store.Memory do
 
         state = %{
           state
-          | completed: Map.put(state.completed, id, updated),
-            index: Map.put(state.index, id, updated)
+          | completed: Map.put(state.completed, id, full),
+            index: Map.put(state.index, id, Operation.lite(full))
         }
 
         {:ok, state}
@@ -89,7 +105,7 @@ defmodule Ferry.Store.Memory do
   def mark_failed(state, id, error, completed_at, batch_id) do
     case Map.fetch(state.index, id) do
       {:ok, op} ->
-        updated = %{
+        full = %{
           op
           | status: :dead,
             error: error,
@@ -99,8 +115,8 @@ defmodule Ferry.Store.Memory do
 
         state = %{
           state
-          | dlq: Map.put(state.dlq, id, updated),
-            index: Map.put(state.index, id, updated)
+          | dlq: Map.put(state.dlq, id, full),
+            index: Map.put(state.index, id, Operation.lite(full))
         }
 
         {:ok, state}
@@ -114,12 +130,12 @@ defmodule Ferry.Store.Memory do
   def move_to_dlq(state, id, error) do
     case Map.fetch(state.index, id) do
       {:ok, op} ->
-        updated = %{op | status: :dead, error: error}
+        full = %{op | status: :dead, error: error}
 
         state = %{
           state
-          | dlq: Map.put(state.dlq, id, updated),
-            index: Map.put(state.index, id, updated)
+          | dlq: Map.put(state.dlq, id, full),
+            index: Map.put(state.index, id, Operation.lite(full))
         }
 
         {:ok, state}
@@ -132,13 +148,13 @@ defmodule Ferry.Store.Memory do
   @impl true
   def move_batch_to_dlq(state, operations, error) do
     Enum.reduce(operations, {:ok, state}, fn op, {:ok, acc} ->
-      updated = %{op | status: :dead, error: error}
+      full = %{op | status: :dead, error: error}
 
       {:ok,
        %{
          acc
-         | dlq: Map.put(acc.dlq, op.id, updated),
-           index: Map.put(acc.index, op.id, updated)
+         | dlq: Map.put(acc.dlq, op.id, full),
+           index: Map.put(acc.index, op.id, Operation.lite(full))
        }}
     end)
   end
@@ -302,8 +318,8 @@ defmodule Ferry.Store.Memory do
 
     {dlq, index} =
       Enum.reduce(ops, {state.dlq, state.index}, fn op, {d, idx} ->
-        updated = %{op | status: :dead, error: error}
-        {Map.put(d, op.id, updated), Map.put(idx, op.id, updated)}
+        full = %{op | status: :dead, error: error}
+        {Map.put(d, op.id, full), Map.put(idx, op.id, Operation.lite(full))}
       end)
 
     {count, %{state | queue: :queue.new(), dlq: dlq, index: index}}
@@ -324,7 +340,7 @@ defmodule Ferry.Store.Memory do
     %{state | index: Map.put(state.index, op.id, op)}
   end
 
-  defp drop_from_queue(queue, %Ferry.Operation{id: id}) do
+  defp drop_from_queue(queue, %Operation{id: id}) do
     queue
     |> :queue.to_list()
     |> Enum.reject(&(&1.id == id))

@@ -195,4 +195,79 @@ defmodule Ferry.Store.EtsTest do
       assert result == {:error, :not_found}
     end
   end
+
+  describe "lite index" do
+    test "index entry for a completed op has no payload/result/error", %{state: state} do
+      {:ok, state} = Ets.push(state, build_op("op1", 1, %{big: String.duplicate("x", 200)}))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.mark_completed(state, "op1", :result_value, DateTime.utc_now(), "b1")
+
+      [{"op1", lite}] = :ets.lookup(state.index_table, "op1")
+      assert lite.status == :completed
+      assert lite.payload == nil
+      assert lite.result == nil
+      assert lite.error == nil
+      # Bookkeeping fields needed for hydration and queries are preserved.
+      assert lite.id == "op1"
+      assert lite.order == 1
+      assert lite.batch_id == "b1"
+      assert %DateTime{} = lite.completed_at
+    end
+
+    test "index entry for a dead op has no payload/result/error", %{state: state} do
+      {:ok, state} = Ets.push(state, build_op("op1", 1, %{big: String.duplicate("x", 200)}))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.mark_failed(state, "op1", :err, DateTime.utc_now(), nil)
+
+      [{"op1", lite}] = :ets.lookup(state.index_table, "op1")
+      assert lite.status == :dead
+      assert lite.payload == nil
+      assert lite.error == nil
+    end
+
+    test "get/2 hydrates a completed op back to the full record", %{state: state} do
+      payload = %{key: "value", n: 42}
+      {:ok, state} = Ets.push(state, build_op("op1", 1, payload))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.mark_completed(state, "op1", :result_value, DateTime.utc_now(), "b1")
+
+      {:ok, op} = Ets.get(state, "op1")
+      assert op.status == :completed
+      assert op.payload == payload
+      assert op.result == :result_value
+      assert op.batch_id == "b1"
+    end
+
+    test "get/2 hydrates a dead op back to the full record", %{state: state} do
+      payload = %{key: "value"}
+      {:ok, state} = Ets.push(state, build_op("op1", 1, payload))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.mark_failed(state, "op1", {:fatal, :badness}, DateTime.utc_now(), nil)
+
+      {:ok, op} = Ets.get(state, "op1")
+      assert op.status == :dead
+      assert op.payload == payload
+      assert op.error == {:fatal, :badness}
+    end
+
+    test "index_table memory is smaller than the corresponding completed_table",
+         %{state: state} do
+      payload = %{blob: String.duplicate("x", 500)}
+
+      state =
+        Enum.reduce(1..100, state, fn i, acc ->
+          {:ok, acc} = Ets.push(acc, build_op("op#{i}", i, payload))
+          {_ops, acc} = Ets.pop_batch(acc, 1)
+          {:ok, acc} = Ets.mark_completed(acc, "op#{i}", :ok, DateTime.utc_now(), nil)
+          acc
+        end)
+
+      word = :erlang.system_info(:wordsize)
+      index_bytes = :ets.info(state.index_table, :memory) * word
+      completed_bytes = :ets.info(state.completed_table, :memory) * word
+
+      # Lite entries should be significantly smaller than full ones.
+      assert index_bytes < completed_bytes
+    end
+  end
 end

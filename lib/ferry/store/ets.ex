@@ -3,10 +3,19 @@ defmodule Ferry.Store.Ets do
   ETS-backed store implementation.
 
   Survives process crashes via a heir process that holds the ETS tables.
-  Uses four tables per instance: queue, dlq, completed, and an index for O(1) lookups by ID.
+  Uses four tables per instance: queue, dlq, completed, and an index for O(1)
+  lookups by ID.
+
+  The `index_table` keeps a lightweight projection (no payload, result, or
+  error) for terminal-state operations (`:completed`, `:dead`). The full
+  record lives in `completed_table`/`dlq_table`; `get/2` hydrates back to the
+  full operation on read using the `completed_at` field from the lite entry
+  to rebuild the `{ts, id}` key for `completed_table`.
   """
 
   @behaviour Ferry.Store
+
+  alias Ferry.Operation
 
   defstruct [:ferry_name, :queue_table, :dlq_table, :completed_table, :index_table]
 
@@ -34,7 +43,7 @@ defmodule Ferry.Store.Ets do
   end
 
   @impl true
-  def push(state, %Ferry.Operation{} = op) do
+  def push(state, %Operation{} = op) do
     :ets.insert(state.queue_table, {{op.order, op.id}, op})
     :ets.insert(state.index_table, {op.id, op})
     {:ok, state}
@@ -67,8 +76,17 @@ defmodule Ferry.Store.Ets do
   @impl true
   def get(state, id) do
     case :ets.lookup(state.index_table, id) do
-      [{^id, op}] -> {:ok, op}
-      [] -> {:error, :not_found}
+      [{^id, %Operation{status: :completed} = lite}] ->
+        {:ok, hydrate_completed(state, id, lite)}
+
+      [{^id, %Operation{status: :dead} = lite}] ->
+        {:ok, hydrate_dlq(state, id, lite)}
+
+      [{^id, op}] ->
+        {:ok, op}
+
+      [] ->
+        {:error, :not_found}
     end
   end
 
@@ -76,7 +94,7 @@ defmodule Ferry.Store.Ets do
   def mark_completed(state, id, result, completed_at, batch_id) do
     case :ets.lookup(state.index_table, id) do
       [{^id, op}] ->
-        updated = %{
+        full = %{
           op
           | status: :completed,
             result: result,
@@ -85,8 +103,8 @@ defmodule Ferry.Store.Ets do
         }
 
         ts = DateTime.to_unix(completed_at, :microsecond)
-        :ets.insert(state.completed_table, {{ts, id}, updated})
-        :ets.insert(state.index_table, {id, updated})
+        :ets.insert(state.completed_table, {{ts, id}, full})
+        :ets.insert(state.index_table, {id, Operation.lite(full)})
         delete_from_queue_by_id(state.queue_table, id, op.order)
         :ets.delete(state.dlq_table, id)
         {:ok, state}
@@ -100,7 +118,7 @@ defmodule Ferry.Store.Ets do
   def mark_failed(state, id, error, completed_at, batch_id) do
     case :ets.lookup(state.index_table, id) do
       [{^id, op}] ->
-        updated = %{
+        full = %{
           op
           | status: :dead,
             error: error,
@@ -108,8 +126,8 @@ defmodule Ferry.Store.Ets do
             batch_id: batch_id
         }
 
-        :ets.insert(state.dlq_table, {id, updated})
-        :ets.insert(state.index_table, {id, updated})
+        :ets.insert(state.dlq_table, {id, full})
+        :ets.insert(state.index_table, {id, Operation.lite(full)})
         delete_from_queue_by_id(state.queue_table, id, op.order)
         {:ok, state}
 
@@ -122,9 +140,9 @@ defmodule Ferry.Store.Ets do
   def move_to_dlq(state, id, error) do
     case :ets.lookup(state.index_table, id) do
       [{^id, op}] ->
-        updated = %{op | status: :dead, error: error}
-        :ets.insert(state.dlq_table, {id, updated})
-        :ets.insert(state.index_table, {id, updated})
+        full = %{op | status: :dead, error: error}
+        :ets.insert(state.dlq_table, {id, full})
+        :ets.insert(state.index_table, {id, Operation.lite(full)})
         delete_from_queue_by_id(state.queue_table, id, op.order)
         {:ok, state}
 
@@ -136,9 +154,9 @@ defmodule Ferry.Store.Ets do
   @impl true
   def move_batch_to_dlq(state, operations, error) do
     Enum.each(operations, fn op ->
-      updated = %{op | status: :dead, error: error}
-      :ets.insert(state.dlq_table, {op.id, updated})
-      :ets.insert(state.index_table, {op.id, updated})
+      full = %{op | status: :dead, error: error}
+      :ets.insert(state.dlq_table, {op.id, full})
+      :ets.insert(state.index_table, {op.id, Operation.lite(full)})
       delete_from_queue_by_id(state.queue_table, op.id, op.order)
     end)
 
@@ -288,9 +306,9 @@ defmodule Ferry.Store.Ets do
     count = length(ops)
 
     Enum.each(ops, fn op ->
-      updated = %{op | status: :dead, error: error}
-      :ets.insert(state.dlq_table, {op.id, updated})
-      :ets.insert(state.index_table, {op.id, updated})
+      full = %{op | status: :dead, error: error}
+      :ets.insert(state.dlq_table, {op.id, full})
+      :ets.insert(state.index_table, {op.id, Operation.lite(full)})
     end)
 
     :ets.delete_all_objects(state.queue_table)
@@ -383,6 +401,26 @@ defmodule Ferry.Store.Ets do
 
       rows ->
         Enum.each(rows, fn [ts] -> :ets.delete(table, {ts, id}) end)
+    end
+  end
+
+  # Use completed_at from the lite entry to rebuild the {ts, id} key and look
+  # up the full op in O(1). Falls back to the lite entry if the row is gone.
+  defp hydrate_completed(_state, _id, %Operation{completed_at: nil} = lite), do: lite
+
+  defp hydrate_completed(state, id, %Operation{completed_at: completed_at} = lite) do
+    ts = DateTime.to_unix(completed_at, :microsecond)
+
+    case :ets.lookup(state.completed_table, {ts, id}) do
+      [{_key, full}] -> full
+      [] -> lite
+    end
+  end
+
+  defp hydrate_dlq(state, id, %Operation{} = lite) do
+    case :ets.lookup(state.dlq_table, id) do
+      [{^id, full}] -> full
+      [] -> lite
     end
   end
 end

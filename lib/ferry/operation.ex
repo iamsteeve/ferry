@@ -19,7 +19,7 @@ defmodule Ferry.Operation do
           batch_id: String.t() | nil
         }
 
-  @enforce_keys [:id, :payload, :order, :status, :pushed_at]
+  @enforce_keys [:id, :order, :status, :pushed_at]
   defstruct [
     :id,
     :payload,
@@ -31,4 +31,17 @@ defmodule Ferry.Operation do
     :error,
     :batch_id
   ]
+
+  @doc """
+  Returns a lightweight projection of the operation with `payload`, `result`,
+  and `error` cleared.
+
+  Stores use this for terminal-state operations in the lookup `index` to avoid
+  duplicating the heavy fields, which already live in the `completed`/`dlq`
+  tables. `Ferry.Store.get/2` hydrates back to the full operation on read.
+  """
+  @spec lite(t()) :: t()
+  def lite(%__MODULE__{} = op) do
+    %__MODULE__{op | payload: nil, result: nil, error: nil}
+  end
 end
