@@ -139,6 +139,73 @@ defmodule Ferry.Store.MemoryTest do
     end
   end
 
+  describe "drain_completed/1" do
+    test "removes all completed operations", %{state: state} do
+      now = DateTime.utc_now()
+
+      state =
+        Enum.reduce(1..3, state, fn i, acc ->
+          {:ok, acc} = Memory.push(acc, build_op("op#{i}", i))
+          {_ops, acc} = Memory.pop_batch(acc, 1)
+          {:ok, acc} = Memory.mark_completed(acc, "op#{i}", :ok, now, nil)
+          acc
+        end)
+
+      assert Memory.completed_size(state) == 3
+      {count, state} = Memory.drain_completed(state)
+      assert count == 3
+      assert Memory.completed_size(state) == 0
+      assert {:error, :not_found} = Memory.get(state, "op1")
+    end
+
+    test "returns 0 when no completed operations", %{state: state} do
+      {count, _state} = Memory.drain_completed(state)
+      assert count == 0
+    end
+  end
+
+  describe "delete/2" do
+    test "removes a pending operation", %{state: state} do
+      {:ok, state} = Memory.push(state, build_op("op1", 1))
+      {:ok, state} = Memory.push(state, build_op("op2", 2))
+
+      {:ok, state} = Memory.delete(state, "op1")
+
+      assert Memory.queue_size(state) == 1
+      assert {:error, :not_found} = Memory.get(state, "op1")
+      assert {:ok, _} = Memory.get(state, "op2")
+    end
+
+    test "removes a completed operation", %{state: state} do
+      {:ok, state} = Memory.push(state, build_op("op1", 1))
+      {_ops, state} = Memory.pop_batch(state, 1)
+      {:ok, state} = Memory.mark_completed(state, "op1", :ok, DateTime.utc_now(), nil)
+
+      assert Memory.completed_size(state) == 1
+      {:ok, state} = Memory.delete(state, "op1")
+
+      assert Memory.completed_size(state) == 0
+      assert {:error, :not_found} = Memory.get(state, "op1")
+    end
+
+    test "removes a dead-lettered operation", %{state: state} do
+      {:ok, state} = Memory.push(state, build_op("op1", 1))
+      {_ops, state} = Memory.pop_batch(state, 1)
+      {:ok, state} = Memory.move_to_dlq(state, "op1", :err)
+
+      assert Memory.dlq_size(state) == 1
+      {:ok, state} = Memory.delete(state, "op1")
+
+      assert Memory.dlq_size(state) == 0
+      assert {:error, :not_found} = Memory.get(state, "op1")
+    end
+
+    test "returns not_found for unknown ID", %{state: state} do
+      {result, _state} = Memory.delete(state, "nope")
+      assert result == {:error, :not_found}
+    end
+  end
+
   describe "purge_completed/3" do
     test "purges by max count", %{state: state} do
       now = DateTime.utc_now()

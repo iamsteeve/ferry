@@ -130,4 +130,69 @@ defmodule Ferry.Store.EtsTest do
       assert hd(completed).result == :done
     end
   end
+
+  describe "drain_completed/1" do
+    test "removes all completed operations", %{state: state} do
+      now = DateTime.utc_now()
+
+      state =
+        Enum.reduce(1..3, state, fn i, acc ->
+          {:ok, acc} = Ets.push(acc, build_op("op#{i}", i))
+          {_ops, acc} = Ets.pop_batch(acc, 1)
+          {:ok, acc} = Ets.mark_completed(acc, "op#{i}", :ok, now, nil)
+          acc
+        end)
+
+      assert Ets.completed_size(state) == 3
+      {count, state} = Ets.drain_completed(state)
+      assert count == 3
+      assert Ets.completed_size(state) == 0
+      assert {:error, :not_found} = Ets.get(state, "op1")
+    end
+
+    test "returns 0 when empty", %{state: state} do
+      {count, _state} = Ets.drain_completed(state)
+      assert count == 0
+    end
+  end
+
+  describe "delete/2" do
+    test "removes a pending operation", %{state: state} do
+      {:ok, state} = Ets.push(state, build_op("op1", 1))
+      {:ok, state} = Ets.push(state, build_op("op2", 2))
+
+      {:ok, state} = Ets.delete(state, "op1")
+
+      assert Ets.queue_size(state) == 1
+      assert {:error, :not_found} = Ets.get(state, "op1")
+      assert {:ok, _} = Ets.get(state, "op2")
+    end
+
+    test "removes a completed operation", %{state: state} do
+      {:ok, state} = Ets.push(state, build_op("op1", 1))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.mark_completed(state, "op1", :ok, DateTime.utc_now(), nil)
+
+      assert Ets.completed_size(state) == 1
+      {:ok, state} = Ets.delete(state, "op1")
+      assert Ets.completed_size(state) == 0
+      assert {:error, :not_found} = Ets.get(state, "op1")
+    end
+
+    test "removes a dead-lettered operation", %{state: state} do
+      {:ok, state} = Ets.push(state, build_op("op1", 1))
+      {_ops, state} = Ets.pop_batch(state, 1)
+      {:ok, state} = Ets.move_to_dlq(state, "op1", :err)
+
+      assert Ets.dlq_size(state) == 1
+      {:ok, state} = Ets.delete(state, "op1")
+      assert Ets.dlq_size(state) == 0
+      assert {:error, :not_found} = Ets.get(state, "op1")
+    end
+
+    test "returns not_found for unknown ID", %{state: state} do
+      {result, _state} = Ets.delete(state, "nope")
+      assert result == {:error, :not_found}
+    end
+  end
 end

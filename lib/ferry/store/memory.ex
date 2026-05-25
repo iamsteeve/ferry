@@ -265,6 +265,37 @@ defmodule Ferry.Store.Memory do
   end
 
   @impl true
+  def drain_completed(state) do
+    count = map_size(state.completed)
+
+    updated_index =
+      Enum.reduce(state.completed, state.index, fn {id, _op}, idx ->
+        Map.delete(idx, id)
+      end)
+
+    {count, %{state | completed: %{}, index: updated_index}}
+  end
+
+  @impl true
+  def delete(state, id) do
+    case Map.fetch(state.index, id) do
+      {:ok, op} ->
+        state = %{
+          state
+          | index: Map.delete(state.index, id),
+            completed: Map.delete(state.completed, id),
+            dlq: Map.delete(state.dlq, id),
+            queue: drop_from_queue(state.queue, op)
+        }
+
+        {:ok, state}
+
+      :error ->
+        {{:error, :not_found}, state}
+    end
+  end
+
+  @impl true
   def clear_queue(state, error) do
     ops = :queue.to_list(state.queue)
     count = length(ops)
@@ -291,6 +322,13 @@ defmodule Ferry.Store.Memory do
 
   defp put_in_index(state, op) do
     %{state | index: Map.put(state.index, op.id, op)}
+  end
+
+  defp drop_from_queue(queue, %Ferry.Operation{id: id}) do
+    queue
+    |> :queue.to_list()
+    |> Enum.reject(&(&1.id == id))
+    |> :queue.from_list()
   end
 
   defp pop_n(queue, 0, acc), do: {Enum.reverse(acc), queue}
